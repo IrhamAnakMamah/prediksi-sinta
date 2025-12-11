@@ -2,16 +2,24 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
+# Import our enhanced modules
+from data_manager import get_val, set_val
+
 def main():
-    st.set_page_config(layout="wide", page_title="SINTA Research Simulator")
-    
+    # Set page config without conflicting with main app
+    try:
+        st.set_page_config(layout="wide", page_title="SINTA Research Simulator")
+    except:
+        # If already set by main app, continue
+        pass
+
     st.title("🔬 SINTA Cluster Simulator: Research (Penelitian)")
     st.markdown("Masukkan data penelitian pada tabel di kiri. Nilai P7 (Rupiah) dalam satuan Juta.")
     st.divider()
 
     # --- KONSTANTA RUMUS ---
     PEMBAGI_NORMALISASI = 261491.37   # Angka pembagi sesuai request
-    
+
     # --- DATA RESEARCH ---
     # Format: (Kode, Nama Item, Bobot, Nilai Default dari Gambar)
     data_research = [
@@ -35,7 +43,7 @@ def main():
     # ==========================================
     with col_left:
         st.subheader("📝 Input Data Research")
-        
+
         # Header Table
         h1, h2, h3, h4, h5 = st.columns([0.6, 3.5, 0.6, 1.2, 1])
         h1.markdown("**Kode**")
@@ -47,23 +55,27 @@ def main():
 
         for kode, nama, bobot, default_val in data_research:
             r1, r2, r3, r4, r5 = st.columns([0.6, 3.5, 0.6, 1.2, 1])
-            
+
             with r1: st.write(f"**{kode}**")
             with r2: st.caption(nama)
             with r3: st.write(f"{bobot}")
             with r4:
+                # Use data manager to get stored value or default
+                current_val = get_val(f"v_{kode}", default_val)
                 # Format %.2f karena rupiah biasanya 2 desimal
                 val = st.number_input(
-                    f"v_{kode}", 
-                    value=float(default_val), 
-                    step=1.0, 
-                    format="%.2f", 
+                    f"v_{kode}",
+                    value=float(current_val),
+                    step=1.0,
+                    format="%.2f",
                     label_visibility="collapsed"
                 )
+                # Update the data manager with the new value
+                set_val(f"v_{kode}", val)
             with r5:
                 subtotal = val * bobot
                 st.write(f"**{subtotal:,.2f}**")
-                
+
                 total_score_raw += subtotal
                 if subtotal > 0:
                     chart_data.append({"Kode": kode, "Nama": nama, "Skor": subtotal})
@@ -82,7 +94,7 @@ def main():
             score_ternormal = 0.0
 
         # --- TAMPILAN 2 KARTU SKOR (STACKED) ---
-        
+
         # Card 1: Total Raw
         st.markdown(f"""
         <div style="background-color: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #ddd; margin-bottom: 10px;">
@@ -105,12 +117,12 @@ def main():
         # Visualisasi Pie Chart
         if chart_data:
             df_chart = pd.DataFrame(chart_data)
-            
+
             # Pie Chart
             fig = px.pie(
-                df_chart, 
-                values='Skor', 
-                names='Kode', 
+                df_chart,
+                values='Skor',
+                names='Kode',
                 title='Komposisi Skor per Item',
                 hole=0.4,
                 color_discrete_sequence=px.colors.sequential.Purples_r

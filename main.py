@@ -1,275 +1,371 @@
 import streamlit as st
 import importlib
+import pandas as pd
 
-# --- IMPORT FILE MODUL ASLI ---
-import publikasi
-import research
-import abdimas
-import hki
-import kelembagaan
-import sdm
+# Import our enhanced modules
+from data_manager import get_val, reset_sinta_data, validate_sinta_data, get_data_manager
+from cluster_prediction import calculate_cluster_score, predict_cluster_type, get_strategic_advice, calculate_advancement_path
 
 # --- KONFIGURASI HALAMAN UTAMA ---
 st.set_page_config(layout="wide", page_title="SINTA Master Simulator")
 
 # ==============================================================================
-# 1. PERSIAPAN DATA STORAGE & MONKEY PATCH (PENYELAMAT DATA)
+# 1. PERSIAPAN DATA STORAGE & IMPROVED MONKEY PATCH
 # ==============================================================================
 
-# Buat "Brankas" penyimpanan data yang permanen
-if "SINTA_DB" not in st.session_state:
-    st.session_state["SINTA_DB"] = {}
+# Initialize data manager
+data_manager = get_data_manager()
 
-# Simpan fungsi asli st.number_input agar tidak hilang
+# Simpan fungsi asli st.number_input untuk mengembalikannya nanti
 _original_number_input = st.number_input
 
 def _patched_number_input(label, *args, **kwargs):
     """
-    Fungsi bajakan untuk st.number_input.
-    Setiap kali user input angka, kita simpan juga ke SINTA_DB.
+    Improved patched function for st.number_input.
+    Every time user inputs a number, we also save it to SINTA_DB.
     """
     # Panggil fungsi asli untuk menampilkan widget
     val = _original_number_input(label, *args, **kwargs)
-    
+
     # Tentukan ID untuk penyimpanan
     # Cek apakah modul menggunakan 'key' khusus (seperti publikasi.py)
     # Jika tidak ada key, gunakan label (seperti sdm.py yang pakai "v_R1")
     storage_key = kwargs.get("key", label)
-    
-    # Simpan nilai ke brankas permanen
-    st.session_state["SINTA_DB"][storage_key] = val
-    
+
+    # Gunakan data_manager untuk menyimpan data
+    data_manager.set_value(storage_key, val)
+
     return val
 
-# Ganti fungsi asli Streamlit dengan fungsi bajakan kita
-# Ini akan berlaku untuk semua modul yang di-import setelah baris ini
-st.number_input = _patched_number_input
-
 # ==============================================================================
-# 2. DATA KONSTANTA & REFERENSI (Copy dari modul asli untuk rumus)
+# 2. IMPROVED UTILITIES
 # ==============================================================================
 
-# 1. PUBLIKASI
-NORMALIZER_PUB = 1776.69
-DATA_PUBLIKASI = [
-    ("Intl", "AI1", "ARTIKEL JURNAL INTERNASIONAL Q1", 40),
-    ("Intl", "AI2", "ARTIKEL JURNAL INTERNASIONAL Q2", 35),
-    ("Intl", "AI3", "ARTIKEL JURNAL INTERNASIONAL Q3", 30),
-    ("Intl", "AI4", "ARTIKEL JURNAL INTERNASIONAL Q4", 25),
-    ("Intl", "AI5", "ARTIKEL JURNAL INTERNASIONAL NON Q", 20),
-    ("Intl", "AI6", "ARTIKEL NON JURNAL INTERNASIONAL", 15),
-    ("Intl", "AI7", "JUMLAH SITASI PUBLIKASI INTERNASIONAL", 1),
-    ("Intl", "AI8", "JUMLAH DOKUMEN PUBLIKASI INTERNASIONAL TERSITASI", 1),
-    ("Nas", "AN1", "ARTIKEL JURNAL NASIONAL PERINGKAT 1", 25),
-    ("Nas", "AN2", "ARTIKEL JURNAL NASIONAL PERINGKAT 2", 20),
-    ("Nas", "AN3", "ARTIKEL JURNAL NASIONAL PERINGKAT 3", 15),
-    ("Nas", "AN4", "ARTIKEL JURNAL NASIONAL PERINGKAT 4", 10),
-    ("Nas", "AN5", "ARTIKEL JURNAL NASIONAL PERINGKAT 5", 5),
-    ("Nas", "AN6", "ARTIKEL JURNAL NASIONAL PERINGKAT 6", 2),
-    ("Nas", "AN8", "PROSIDING NASIONAL", 2),
-    ("Nas", "AN9", "JUMLAH SITASI PUBLIKASI NASIONAL PER DOSEN", 1),
-    ("Other", "DGS2", "GS CITATION PER LECTURER", 1),
-    ("Other", "B1", "BUKU AJAR", 20),
-    ("Other", "B2", "BUKU REFERENSI", 40),
-    ("Other", "B3", "BUKU MONOGRAF", 20),
-]
-
-# 2. RESEARCH
-PEMBAGI_NORMALISASI_RES = 261491.37
-DATA_RESEARCH = [
-    ("P1", "JUMLAH PENELITIAN HIBAH LUAR NEGERI (KETUA)", 40),
-    ("P2", "JUMLAH PENELITIAN HIBAH LUAR NEGERI (ANGGOTA)", 10),
-    ("P3", "JUMLAH PENELITIAN HIBAH EKSTERNAL (KETUA)", 30),
-    ("P4", "JUMLAH PENELITIAN HIBAH EKSTERNAL (ANGGOTA)", 10),
-    ("P5", "JUMLAH PENELITIAN INTERNAL INSTITUSI (KETUA)", 15),
-    ("P6", "JUMLAH PENELITIAN INTERNAL INSTITUSI (ANGGOTA)", 5),
-    ("P7", "JUMLAH RUPIAH PENELITIAN (JUTA RUPIAH)", 0.05),
-]
-
-# 3. ABDIMAS
-PEMBAGI_NORMALISASI_ABDIMAS = 447937.99
-DATA_ABDIMAS = [
-    ("PM1", "JUMLAH PENGABDIAN MASYARAKAT INTERNASIONAL (KETUA)", 40),
-    ("PM2", "JUMLAH PENGABDIAN MASYARAKAT INTERNASIONAL (ANGGOTA)", 10),
-    ("PM3", "JUMLAH PENGABDIAN MASYARAKAT NASIONAL/EKSTERNAL (KETUA)", 30),
-    ("PM4", "JUMLAH PENGABDIAN MASYARAKAT NASIONAL/EKSTERNAL (ANGGOTA)", 10),
-    ("PM5", "JUMLAH PENGABDIAN MASYARAKAT LOKAL/INTERNAL INSTITUSI (KETUA)", 15),
-    ("PM6", "JUMLAH PENGABDIAN MASYARAKAT LOKAL/INTERNAL INSTITUSI (ANGGOTA)", 5),
-    ("PM7", "JUMLAH RUPIAH PENGABDIAN MASYARAKAT (JUTA RUPIAH)", 0.05),
-]
-
-# 4. HKI
-PEMBAGI_NORMALISASI_HKI = 14.7
-DATA_HKI = [
-    ("KI1", "HKI PATEN", 40),
-    ("KI2", "HKI PATEN SEDERHANA", 20),
-    ("KI3", "HKI MEREK", 1),
-    ("KI4", "HKI INDIKASI GEOGRAFIS", 10),
-    ("KI5", "HKI DESAIN INDUSTRI", 20),
-    ("KI6", "HKI DESAIN TATA LETAK SIRKUIT TERPADU", 20),
-    ("KI7", "HKI RAHASIA DAGANG", 0),
-    ("KI8", "HKI PERLINDUNGAN VARIETAS TANAMAN", 40),
-    ("KI9", "HKI HAK CIPTA", 1),
-    ("KI10", "HKI SELAIN TERDAFTAR / DIBERI / DITERIMA", 1),
-]
-
-# 5. SDM
-PEMBAGI_NORMALISASI_SDM = 2.443
-DATA_SDM = [
-    ("R1", "REVIEWER JURNAL INTERNASIONAL (ORANG)", 2),
-    ("R2", "REVIEWER JURNAL NASIONAL SINTA 1 & 2 (ORANG)", 1),
-    ("R3", "REVIEWER JURNAL NASIONAL SINTA 3 S.D. 6 (ORANG)", 0.5),
-    ("DOS1", "DOSEN PROFESSOR", 4),
-    ("DOS2", "DOSEN LEKTOR KEPALA", 3),
-    ("DOS3", "DOSEN LEKTOR", 2),
-    ("DOS4", "DOSEN ASISTEN AHLI", 1),
-    ("DOS5", "DOSEN NON JAFA", 0),
-]
-
-# 6. KELEMBAGAAN
-FAKTOR_PENYESUAIAN_KEL = 0.30
-PEMBAGI_NORMALISASI_KEL = 2181.33
-DATA_KELEMBAGAAN = [
-    ("Akreditasi", "APS1", "AKREDITASI PRODI A/UNGGUL/INTERNASIONAL", 40),
-    ("Akreditasi", "APS2", "AKREDITASI PRODI B/BAIK SEKALI", 30),
-    ("Akreditasi", "APS3", "AKREDITASI PRODI C/BAIK", 20),
-    ("Akreditasi", "APS4", "AKREDITASI PRODI D/TIDAK TERAKREDITASI", 0),
-    ("Jurnal", "JO1", "JUMLAH JURNAL TERAKREDITASI S1", 40),
-    ("Jurnal", "JO2", "JUMLAH JURNAL TERAKREDITASI S2", 30),
-    ("Jurnal", "JO3", "JUMLAH JURNAL TERAKREDITASI S3", 20),
-    ("Jurnal", "JO4", "JUMLAH JURNAL TERAKREDITASI S4", 10),
-    ("Jurnal", "JO5", "JUMLAH JURNAL TERAKREDITASI S5", 5),
-    ("Jurnal", "JO6", "JUMLAH JURNAL TERAKREDITASI S6", 2),
-]
-
-# ==============================================================================
-# 3. UTILITIES
-# ==============================================================================
-
-def run_module_safely(module_main_func):
+def run_module_safely(module_name):
     """Menjalankan modul lain tanpa error double st.set_page_config"""
+    # Hanya ganti st.number_input jika kita ingin menggunakan versi patched
+    if st.session_state.get("use_patched_input", True):
+        st.number_input = _patched_number_input
+
     original_set_page_config = st.set_page_config
     st.set_page_config = lambda *args, **kwargs: None
+
     try:
-        module_main_func()
+        # Import dan jalankan modul
+        module = importlib.import_module(module_name)
+        module.main()
     except Exception as e:
-        st.error(f"Error pada modul: {e}")
+        st.error(f"Error pada modul {module_name}: {e}")
+        st.info("Silakan pilih modul lain atau kembali ke dashboard utama.")
     finally:
         st.set_page_config = original_set_page_config
 
-def get_val(key):
-    """Mengambil data dari brankas SINTA_DB"""
-    return st.session_state["SINTA_DB"].get(key, 0.0)
-
-def calculate_all_scores():
-    """Menghitung total skor berdasarkan data di SINTA_DB"""
-    
-    # 1. SDM (Format label: v_Kode)
-    raw_sdm = sum([get_val(f"v_{code}") * bobot for code, _, bobot in DATA_SDM])
-    norm_sdm = (raw_sdm / PEMBAGI_NORMALISASI_SDM) * 100
-
-    # 2. RESEARCH (Format label: v_Kode)
-    raw_res = sum([get_val(f"v_{code}") * bobot for code, _, bobot in DATA_RESEARCH])
-    norm_res = (raw_res / PEMBAGI_NORMALISASI_RES) * 100
-
-    # 3. ABDIMAS (Format label: v_Kode)
-    raw_abd = sum([get_val(f"v_{code}") * bobot for code, _, bobot in DATA_ABDIMAS])
-    norm_abd = (raw_abd / PEMBAGI_NORMALISASI_ABDIMAS) * 100
-
-    # 4. HKI (Format label: v_Kode)
-    raw_hki = sum([get_val(f"v_{code}") * bobot for code, _, bobot in DATA_HKI])
-    norm_hki = (raw_hki / PEMBAGI_NORMALISASI_HKI) * 100
-
-    # 5. KELEMBAGAAN (Format label: v_Kode)
-    raw_kel = sum([get_val(f"v_{code}") * bobot for _, code, _, bobot in DATA_KELEMBAGAAN])
-    adj_kel = raw_kel * FAKTOR_PENYESUAIAN_KEL
-    norm_kel = (adj_kel / PEMBAGI_NORMALISASI_KEL) * 100
-
-    # 6. PUBLIKASI (Format Key khusus: Kode langsung, misal "AI1")
-    # Perhatikan: Di file publikasi.py, st.number_input menggunakan key=kode (bukan v_kode)
-    raw_pub = sum([get_val(code) * bobot for _, code, _, bobot in DATA_PUBLIKASI])
-    norm_pub = (raw_pub / NORMALIZER_PUB) * 100
-
-    # Total Weighted
-    # A(25%) + B(10%) + C(15%) + D(15%) + E(15%) + F(15%)
-    total = (norm_pub * 0.25) + (norm_hki * 0.10) + (norm_kel * 0.15) + (norm_res * 0.15) + (norm_abd * 0.15) + (norm_sdm * 0.15)
-    
-    return total, {
-        "Publikasi (25%)": norm_pub, 
-        "Research (15%)": norm_res, 
-        "Abdimas (15%)": norm_abd, 
-        "HKI (10%)": norm_hki, 
-        "SDM (15%)": norm_sdm, 
-        "Kelembagaan (15%)": norm_kel
-    }
-
 # ==============================================================================
-# 4. MAIN NAVIGATION
+# 3. ENHANCED MAIN NAVIGATION
 # ==============================================================================
 
 def main():
+    # Sidebar dengan peningkatan
     with st.sidebar:
-        st.title("🎛️ Navigasi")
+        st.title("🎛️ Navigasi SINTA")
         menu = st.radio("Pilih Modul", [
             "🏆 Dashboard Utama",
+            "📊 Ringkasan Lengkap",
+            "🎯 Strategi Peningkatan",
             "📚 Publikasi",
             "🔬 Research",
             "🤝 Abdimas",
             "💡 HKI",
             "👥 SDM",
-            "🏛️ Kelembagaan"
+            "🏛️ Kelembagaan",
+            "⚙️ Pengaturan"
         ])
-        
-        st.divider()
-        # Preview skor kecil
-        prev_total, _ = calculate_all_scores()
-        st.metric("Total Score (95%)", f"{prev_total:,.2f}")
-        st.caption("Pindah ke Dashboard untuk hasil detail.")
 
-    # --- ROUTING ---
-    if menu == "🏆 Dashboard Utama":
-        st.title("🏆 Final Dashboard Prediction")
-        st.markdown("Ringkasan prediksi Cluster Mandiri.")
+        # Tambahkan informasi tambahan di sidebar
         st.divider()
-        
-        total_score, rincian = calculate_all_scores()
-        THRESHOLD = 28.26
-        
-        col1, col2 = st.columns([1, 1.5])
-        
+
+        # Preview skor kecil dengan penanganan error
+        try:
+            total_score, component_scores = calculate_cluster_score()
+            st.metric("Total Score", f"{total_score:,.2f}")
+            pred, color, icon = predict_cluster_type(total_score)
+            st.success(f"{icon} {pred}")
+            st.caption("Pindah ke Dashboard untuk hasil lengkap.")
+        except:
+            st.error("Error menghitung skor")
+
+        st.divider()
+        st.info("💡 Tips: Gunakan modul individual untuk mengisi data spesifik, lalu kembali ke dashboard untuk melihat total skor.")
+
+    # --- ROUTING DENGAN PENINGKATAN ---
+    if menu == "🏆 Dashboard Utama":
+        st.title("🏆 Dashboard Prediksi Cluster SINTA")
+        st.markdown("### Ringkasan prediksi cluster dan analisis komprehensif.")
+        st.divider()
+
+        # Hitung skor menggunakan fungsi yang ditingkatkan
+        total_score, component_scores = calculate_cluster_score()
+
+        # Tampilkan informasi prediksi cluster
+        cluster_pred, color, icon = predict_cluster_type(total_score)
+        st.subheader(f"{icon} Prediksi Cluster: {cluster_pred}")
+
+        # Tambahkan ringkasan visual
+        col1, col2, col3 = st.columns(3)
+
         with col1:
-            st.markdown("### Total Score Akhir")
-            st.markdown(f"<h1 style='font-size: 48px;'>{total_score:,.2f}</h1>", unsafe_allow_html=True)
-            
-            if total_score >= THRESHOLD:
-                st.success(f"✅ **Lolos Cluster Mandiri!**\n\nSurplus: +{total_score - THRESHOLD:.2f}")
-            else:
-                st.error(f"❌ **Belum Lolos.**\n\nKurang: {THRESHOLD - total_score:.2f}")
-        
+            st.markdown("### 📊 Skor Total")
+            st.markdown(f"<h1 style='text-align: center; color: #4F8BF9;'>{total_score:,.2f}</h1>", unsafe_allow_html=True)
+
         with col2:
-            st.markdown("### Rincian Skor Ternormalisasi")
+            st.markdown("### 🎯 Target Cluster")
+            advancement = calculate_advancement_path(total_score)
+            if advancement['next_cluster'] != 'Maximum':
+                st.markdown(f"<h1 style='text-align: center; color: #8C8C8C;'>{advancement['target_score']:.2f}</h1>", unsafe_allow_html=True)
+                st.caption(f"Untuk {advancement['next_cluster']}")
+            else:
+                st.markdown(f"<h1 style='text-align: center; color: #4CAF50;'>Maksimal</h1>", unsafe_allow_html=True)
+
+        with col3:
+            st.markdown("### ⚡ Jarak ke Target")
+            if advancement['next_cluster'] != 'Maximum':
+                gap = advancement['gap']
+                color_gap = "green" if gap <= 0 else "red"
+                st.markdown(f"<h1 style='text-align: center; color: {color_gap};'>{'+' if gap >= 0 else ''}{gap:.2f}</h1>", unsafe_allow_html=True)
+                st.caption("Poin yang dibutuhkan")
+            else:
+                st.markdown(f"<h1 style='text-align: center; color: #4CAF50;'>✅</h1>", unsafe_allow_html=True)
+                st.caption("Target maksimal tercapai")
+
+        # Tampilkan status kelulusan
+        if total_score >= 50:  # Threshold for Mandiri cluster
+            st.success(f"✅ **Lolos Cluster Mandiri!**  Skor: {total_score:.2f}")
+        else:
+            st.error(f"❌ **Belum Lolos Cluster Mandiri.**  Skor: {total_score:.2f} (butuh {30-total_score:.2f} poin lagi)")
+
+        st.divider()
+
+        # Tampilkan rincian skor dalam dua kolom
+        col1, col2 = st.columns([1.5, 1])
+
+        with col1:
+            st.markdown("### 📈 Rincian Skor Ternormalisasi")
             # Convert dict to dataframe for nicer display
-            import pandas as pd
+            rincian = {f"{k} ({'25%' if k == 'Publikasi' else '15%' if k in ['Research', 'SDM', 'Kelembagaan'] else '10%' if k == 'HKI' else '15%' if k == 'Abdimas' else '15%'})": v
+                      for k, v in component_scores.items()}
             df_rincian = pd.DataFrame(list(rincian.items()), columns=["Komponen", "Skor Ternormalisasi"])
+
+            # Tambahkan visualisasi berwarna
+            df_rincian["Kategori"] = df_rincian["Skor Ternormalisasi"].apply(
+                lambda x: "🟢 Baik" if x >= 50 else ("🟡 Cukup" if x >= 20 else "🔴 Perlu Perbaikan")
+            )
+
             st.dataframe(
                 df_rincian.style.format({"Skor Ternormalisasi": "{:.2f}"}),
                 use_container_width=True,
                 hide_index=True
             )
 
+            # Visualisasi perbandingan
+            st.markdown("### 📊 Perbandingan Komponen")
+            st.bar_chart(df_rincian.set_index("Komponen")["Skor Ternormalisasi"])
+
+        with col2:
+            st.markdown("### 🎯 Rekomendasi Strategis")
+            # Dapatkan rekomendasi strategis berdasarkan skor komponen
+            recommendations = get_strategic_advice(component_scores)
+
+            for rec in recommendations[:3]:  # Ambil 3 rekomendasi teratas
+                priority_emoji = "🔴" if rec['priority'] == "TINGGI" else "🟡" if rec['priority'] == "SEDANG" else "🟢"
+                st.write(f"{priority_emoji} **{rec['area']}** (Skor: {rec['current_score']:.2f})")
+                st.write(f"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{rec['action']}")
+                st.divider()
+
+    elif menu == "📊 Ringkasan Lengkap":
+        st.title("📊 Ringkasan Lengkap SINTA")
+        st.markdown("### Analisis menyeluruh dari semua komponen penilaian.")
+        st.divider()
+
+        total_score, component_scores = calculate_cluster_score()
+
+        # Tampilkan ringkasan dalam bentuk kartu
+        cols = st.columns(3)
+        komponen_utama = ["Publikasi", "Research", "SDM"]
+        for i, komp in enumerate(komponen_utama):
+            with cols[i]:
+                skor = component_scores[komp]
+                st.metric(
+                    label=f"{komp} (25%/15%/15%)",
+                    value=f"{skor:.2f}",
+                    delta="+" + f"{skor:.1f}" if skor > 50 else f"{skor:.1f}",
+                    delta_color="normal" if skor > 50 else "inverse"
+                )
+
+        cols2 = st.columns(3)
+        komponen_lain = ["Abdimas", "HKI", "Kelembagaan"]
+        for i, komp in enumerate(komponen_lain):
+            with cols2[i]:
+                skor = component_scores[komp]
+                st.metric(
+                    label=f"{komp} (15%/10%/15%)",
+                    value=f"{skor:.2f}",
+                    delta="+" + f"{skor:.1f}" if skor > 20 else f"{skor:.1f}",
+                    delta_color="normal" if skor > 20 else "inverse"
+                )
+
+        # Tampilkan total dan prediksi cluster
+        st.divider()
+        st.subheader("Total Gabungan & Prediksi Cluster")
+
+        cluster_pred, color, icon = predict_cluster_type(total_score)
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Skor", f"{total_score:.2f}")
+        with col2:
+            st.metric("Prediksi Cluster", f"{icon} {cluster_pred}")
+        with col3:
+            advancement = calculate_advancement_path(total_score)
+            if advancement['next_cluster'] != 'Maximum':
+                st.metric("Gap ke Cluster", f"-{advancement['gap']:.2f}")
+            else:
+                st.metric("Status", "Max")
+
+        # Tampilkan distribusi skor
+        st.divider()
+        st.subheader("Distribusi Skor Komponen")
+        df_dist = pd.DataFrame.from_dict(component_scores, orient='index', columns=['Skor'])
+        df_dist['Presentase dari Total'] = df_dist['Skor'] / df_dist['Skor'].sum() * 100
+        st.bar_chart(df_dist['Skor'])
+
+    elif menu == "🎯 Strategi Peningkatan":
+        st.title("🎯 Strategi Peningkatan SINTA")
+        st.markdown("### Rekomendasi strategis untuk peningkatan cluster.")
+        st.divider()
+
+        # Hitung skor terlebih dahulu
+        total_score, component_scores = calculate_cluster_score()
+
+        # Tampilkan rekomendasi strategis
+        recommendations = get_strategic_advice(component_scores)
+
+        st.subheader("Rekomendasi Berdasarkan Prioritas")
+
+        for i, rec in enumerate(recommendations):
+            priority_color = "red" if rec['priority'] == "TINGGI" else "orange" if rec['priority'] == "SEDANG" else "green"
+            priority_emoji = "🔴" if rec['priority'] == "TINGGI" else "🟡" if rec['priority'] == "SEDANG" else "🟢"
+
+            with st.container():
+                st.markdown(f"### {i+1}. {priority_emoji} {rec['area']} (Skor: {rec['current_score']:.2f})")
+                st.markdown(f"**Prioritas: {rec['priority']}**")
+                st.info(rec['action'])
+
+                # Tambahkan saran spesifik
+                if rec['area'] == 'Publikasi':
+                    st.write("- Tingkatkan jumlah publikasi internasional (Q1-Q4)")
+                    st.write("- Fokus pada sitasi dan pengakuan (citations)")
+                    st.write("- Lengkapi publikasi nasional terakreditasi")
+                elif rec['area'] == 'Research':
+                    st.write("- Ajukan lebih banyak hibah riset eksternal")
+                    st.write("- Tingkatkan keterlibatan sebagai ketua peneliti")
+                    st.write("- Tingkatkan nilai dana penelitian")
+                elif rec['area'] == 'HKI':
+                    st.write("- Ajukan lebih banyak paten dan HKI")
+                    st.write("- Fokus pada HKI bernilai tinggi (Paten, Paten Sederhana)")
+                    st.write("- Dokumentasikan kekayaan intelektual yang sudah ada")
+                elif rec['area'] == 'SDM':
+                    st.write("- Tingkatkan kualifikasi dosen (jabatan fungsional)")
+                    st.write("- Dorong dosen menjadi reviewer jurnal internasional")
+                    st.write("- Lengkapi sertifikasi dan pelatihan dosen")
+                elif rec['area'] == 'Kelembagaan':
+                    st.write("- Perbaiki akreditasi program studi")
+                    st.write("- Tingkatkan jumlah jurnal terakreditasi")
+                    st.write("- Optimalisasi struktur organisasi")
+                elif rec['area'] == 'Abdimas':
+                    st.write("- Tingkatkan kegiatan pengabdian masyarakat")
+                    st.write("- Ajukan hibah pengabdian dari sumber eksternal")
+                    st.write("- Lengkapi dokumentasi dan laporan pengabdian")
+
+                st.divider()
+
+        # Tampilkan rencana peningkatan ke cluster berikutnya
+        st.subheader("Rencana Peningkatan ke Cluster Berikutnya")
+        advancement = calculate_advancement_path(total_score)
+
+        if advancement['next_cluster'] != 'Maximum':
+            st.info(f"""
+            📈 **Rencana Peningkatan:**
+            - Cluster saat ini: {advancement['current_cluster']}
+            - Target cluster: {advancement['next_cluster']}
+            - Skor yang dibutuhkan: {advancement['target_score']:.2f}
+            - Jarak yang harus ditutup: {advancement['gap']:.2f} poin
+            - Rekomendasi: Fokus pada 3 komponen dengan skor terendah untuk efek maksimal terhadap total skor
+            """)
+        else:
+            st.success("🎉 Selamat! Anda telah mencapai cluster tertinggi.")
+
     # --- MODUL INPUT (Jalankan file asli) ---
     elif menu == "📚 Publikasi":
-        run_module_safely(publikasi.main)
+        run_module_safely("publikasi")
     elif menu == "🔬 Research":
-        run_module_safely(research.main)
+        run_module_safely("research")
     elif menu == "🤝 Abdimas":
-        run_module_safely(abdimas.main)
+        run_module_safely("abdimas")
     elif menu == "💡 HKI":
-        run_module_safely(hki.main)
+        run_module_safely("hki")
     elif menu == "👥 SDM":
-        run_module_safely(sdm.main)
+        run_module_safely("sdm")
     elif menu == "🏛️ Kelembagaan":
-        run_module_safely(kelembagaan.main)
+        run_module_safely("kelembagaan")
+    elif menu == "⚙️ Pengaturan":
+        st.title("⚙️ Pengaturan Aplikasi")
+        st.info("Pengaturan untuk sistem prediksi SINTA")
+
+        with st.expander("Data Simulasi"):
+            summary = data_manager.get_data_summary()
+            st.write(f"Jumlah input yang tersimpan: {summary['total_fields']}")
+            st.write(f"Input dengan nilai > 0: {summary['non_zero_fields']}")
+            st.write(f"Nilai total: {summary['total_value']:.2f}")
+
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Reset Data Simulasi"):
+                    reset_sinta_data()
+                    st.success("Data berhasil direset")
+                    st.rerun()
+            with col2:
+                if st.button("Validasi Data"):
+                    is_valid = validate_sinta_data()
+                    if is_valid:
+                        st.success("✅ Data valid - tidak ada masalah ditemukan")
+                    else:
+                        st.warning("⚠️ Ada masalah dengan data, lihat pesan di atas")
+
+        with st.expander("Simpan/Muat Data"):
+            st.info("Fitur untuk menyimpan dan memuat data SINTA")
+            filename = st.text_input("Nama file untuk menyimpan/memuat:", "sinta_data.json")
+            col1, col2 = st.columns(2)
+
+            with col1:
+                if st.button("💾 Simpan Data"):
+                    if data_manager.save_to_file(filename):
+                        st.success(f"Data berhasil disimpan ke {filename}")
+                    else:
+                        st.error("Gagal menyimpan data")
+
+            with col2:
+                if st.button("📂 Muat Data"):
+                    if data_manager.load_from_file(filename):
+                        st.success(f"Data berhasil dimuat dari {filename}")
+                        st.rerun()
+                    else:
+                        st.error("Gagal memuat data")
+
+        with st.expander("Informasi Sistem"):
+            st.write("Sistem prediksi cluster SINTA versi terbaru")
+            st.write("- Data persistence ditingkatkan")
+            st.write("- Algoritma prediksi cluster ditingkatkan")
+            st.write("- Rekomendasi strategis ditambahkan")
+            st.write("- Validasi data ditambahkan")
 
 if __name__ == "__main__":
     main()

@@ -2,9 +2,17 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
+# Import our enhanced modules
+from data_manager import get_val, set_val
+
 def main():
-    st.set_page_config(layout="wide", page_title="SINTA Kelembagaan Simulator")
-    
+    # Set page config without conflicting with main app
+    try:
+        st.set_page_config(layout="wide", page_title="SINTA Kelembagaan Simulator")
+    except:
+        # If already set by main app, continue
+        pass
+
     st.title("🏛️ SINTA Cluster Simulator: Kelembagaan")
     st.markdown("Masukkan nilai pada tabel di kiri. Perhitungan mencakup Total, Penyesuaian (30%), dan Normalisasi.")
     st.divider()
@@ -12,7 +20,7 @@ def main():
     # --- KONSTANTA RUMUS ---
     FAKTOR_PENYESUAIAN = 0.30       # 30%
     PEMBAGI_NORMALISASI = 2181.33   # Angka pembagi
-    
+
     # --- DATA KELEMBAGAAN ---
     # Format: (Group, Kode, Nama Item, Bobot, Nilai Default)
     # Grouping: APS (Akreditasi Prodi) & JO (Jurnal)
@@ -21,7 +29,7 @@ def main():
         ("Akreditasi", "APS2", "AKREDITASI PRODI B/BAIK SEKALI", 30, 0.343),
         ("Akreditasi", "APS3", "AKREDITASI PRODI C/BAIK", 20, 0.114),
         ("Akreditasi", "APS4", "AKREDITASI PRODI D/TIDAK TERAKREDITASI", 0, 0.029),
-        
+
         ("Jurnal", "JO1", "JUMLAH JURNAL TERAKREDITASI S1", 40, 0.000),
         ("Jurnal", "JO2", "JUMLAH JURNAL TERAKREDITASI S2", 30, 2.000),
         ("Jurnal", "JO3", "JUMLAH JURNAL TERAKREDITASI S3", 20, 2.000),
@@ -41,7 +49,7 @@ def main():
     # ==========================================
     with col_left:
         st.subheader("📝 Input Data Kelembagaan")
-        
+
         # Header Table
         h1, h2, h3, h4, h5 = st.columns([0.6, 3.5, 0.6, 1.2, 1])
         h1.markdown("**Kode**")
@@ -53,23 +61,27 @@ def main():
 
         for group, kode, nama, bobot, default_val in data_kelembagaan:
             r1, r2, r3, r4, r5 = st.columns([0.6, 3.5, 0.6, 1.2, 1])
-            
+
             with r1: st.write(f"**{kode}**")
             with r2: st.caption(nama)
             with r3: st.write(f"{bobot}")
             with r4:
+                # Use data manager to get stored value or default
+                current_val = get_val(f"v_{kode}", default_val)
                 # Menggunakan step=0.001 agar presisi desimal APS bisa diinput
                 val = st.number_input(
-                    f"v_{kode}", 
-                    value=float(default_val), 
-                    step=0.001, 
-                    format="%.3f", 
+                    f"v_{kode}",
+                    value=float(current_val),
+                    step=0.001,
+                    format="%.3f",
                     label_visibility="collapsed"
                 )
+                # Update the data manager with the new value
+                set_val(f"v_{kode}", val)
             with r5:
                 subtotal = val * bobot
                 st.write(f"**{subtotal:,.2f}**") # 2 desimal cukup untuk total per item
-                
+
                 total_score_raw += subtotal
                 if subtotal > 0:
                     chart_data.append({"Kode": kode, "Nama": nama, "Skor": subtotal, "Group": group})
@@ -82,10 +94,10 @@ def main():
 
         # --- RUMUS PERHITUNGAN ---
         # 1. Total Score Kelembagaan (Sudah dihitung di loop)
-        
+
         # 2. Total Score Penyesuaian (Total * 30%)
         score_penyesuaian = total_score_raw * FAKTOR_PENYESUAIAN
-        
+
         # 3. Total Score Ternormal ((Penyesuaian / 2181.33) * 100)
         if score_penyesuaian > 0:
             score_ternormal = (score_penyesuaian / PEMBAGI_NORMALISASI) * 100
@@ -93,7 +105,7 @@ def main():
             score_ternormal = 0.0
 
         # --- TAMPILAN 3 KARTU SKOR (STACKED) ---
-        
+
         # Card 1: Total Raw
         st.markdown(f"""
         <div style="background-color: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #ddd; margin-bottom: 10px;">
@@ -124,12 +136,12 @@ def main():
         # Visualisasi Pie Chart
         if chart_data:
             df_chart = pd.DataFrame(chart_data)
-            
+
             # Pie Chart
             fig = px.pie(
-                df_chart, 
-                values='Skor', 
-                names='Kode', 
+                df_chart,
+                values='Skor',
+                names='Kode',
                 title='Komposisi Skor per Item',
                 hole=0.4,
                 color_discrete_sequence=px.colors.qualitative.Pastel

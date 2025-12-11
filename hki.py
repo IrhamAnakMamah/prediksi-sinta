@@ -2,9 +2,17 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
+# Import our enhanced modules
+from data_manager import get_val, set_val
+
 def main():
-    st.set_page_config(layout="wide", page_title="SINTA HKI Simulator")
-    
+    # Set page config without conflicting with main app
+    try:
+        st.set_page_config(layout="wide", page_title="SINTA HKI Simulator")
+    except:
+        # If already set by main app, continue
+        pass
+
     st.title("💡 SINTA Cluster Simulator: HKI")
     st.markdown("Masukkan nilai pada tabel di kiri. Skor ternormalisasi dihitung menggunakan rumus terbaru.")
     st.divider()
@@ -35,7 +43,7 @@ def main():
     # ==========================================
     with col_left:
         st.subheader("📝 Input Data HKI")
-        
+
         # Header Table
         h1, h2, h3, h4, h5 = st.columns([0.6, 3.5, 0.6, 1.2, 1])
         h1.markdown("**Kode**")
@@ -47,22 +55,26 @@ def main():
 
         for kode, nama, bobot, default_val in data_hki:
             r1, r2, r3, r4, r5 = st.columns([0.6, 3.5, 0.6, 1.2, 1])
-            
+
             with r1: st.write(f"**{kode}**")
             with r2: st.caption(nama)
             with r3: st.write(f"{bobot}")
             with r4:
+                # Use data manager to get stored value or default
+                current_val = get_val(f"v_{kode}", default_val)
                 val = st.number_input(
-                    f"v_{kode}", 
-                    value=float(default_val), 
-                    step=0.001, 
-                    format="%.3f", 
+                    f"v_{kode}",
+                    value=float(current_val),
+                    step=0.001,
+                    format="%.3f",
                     label_visibility="collapsed"
                 )
+                # Update the data manager with the new value
+                set_val(f"v_{kode}", val)
             with r5:
                 subtotal = val * bobot
                 st.write(f"**{subtotal:,.3f}**")
-                
+
                 total_score_raw += subtotal
                 if subtotal > 0:
                     chart_data.append({"Kode": kode, "Nama": nama, "Skor": subtotal})
@@ -93,19 +105,19 @@ def main():
             </div>
         </div>
         """, unsafe_allow_html=True)
-        
+
         st.caption("ℹ️ Rumus: (Total Score / 14.7) × 100")
         st.divider()
 
         # Visualisasi
         if chart_data:
             df_chart = pd.DataFrame(chart_data)
-            
+
             # Pie Chart
             fig = px.pie(
-                df_chart, 
-                values='Skor', 
-                names='Kode', 
+                df_chart,
+                values='Skor',
+                names='Kode',
                 title='Kontribusi Skor per Item',
                 hole=0.5,
                 color_discrete_sequence=px.colors.sequential.Teal
