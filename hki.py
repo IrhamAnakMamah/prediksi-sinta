@@ -88,7 +88,7 @@ def main():
         # --- RUMUS BARU ---
         # (Total Score / 14.7) * 100
         if total_score_raw > 0:
-            score_normalized = (total_score_raw / 14.7) * 100
+            score_normalized = (total_score_raw / max(total_score_raw, 14.7)) * 100
         else:
             score_normalized = 0.0
 

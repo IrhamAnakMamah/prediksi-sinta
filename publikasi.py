@@ -112,7 +112,7 @@ def main():
         st.markdown("### 📊 Analisis Skor Publikasi")
 
         # --- HITUNG SKOR TERNORMALISASI ---
-        normalized_score = (total_score_all / NORMALIZER_PUB) * 100
+        normalized_score = (total_score_all / max(total_score_all, NORMALIZER_PUB)) * 100
 
         # 1. SCORE CARDS (TAMPILAN BARU: 2 KOLOM)
         c_raw, c_norm = st.columns(2)

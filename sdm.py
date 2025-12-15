@@ -90,7 +90,7 @@ def main():
         # --- RUMUS PERHITUNGAN ---
         # (Total Score / 2.44) * 100
         if total_score_raw > 0:
-            score_ternormal = (total_score_raw / PEMBAGI_NORMALISASI_SDM) * 100
+            score_ternormal = (total_score_raw / max(total_score_raw, PEMBAGI_NORMALISASI_SDM)) * 100
         else:
             score_ternormal = 0.0
 

@@ -100,7 +100,7 @@ def main():
 
         # 3. Total Score Ternormal ((Penyesuaian / 2181.33) * 100)
         if score_penyesuaian > 0:
-            score_ternormal = (score_penyesuaian / PEMBAGI_NORMALISASI) * 100
+            score_ternormal = (score_penyesuaian / max(PEMBAGI_NORMALISASI, score_penyesuaian)) * 100
         else:
             score_ternormal = 0.0
 
